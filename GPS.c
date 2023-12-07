@@ -4,7 +4,7 @@
 #define MAX_BUFFER_SIZE 100
 
 //Initialize serial communication
-void Serial0_begin(void);
+void Serial0_begin(unsigned int baud_rate);
 void GPS_begin(unsigned int baud_rate);
 
 //Serial Communication functions
@@ -14,6 +14,7 @@ unsigned char SerCom1_Receive(void);
 void SerCom1_Send(unsigned char *data);
 unsigned char SerCom1(void);
 unsigned char* NMEA_sentacne(void);
+
 
 //Data processing
 unsigned int findComma(unsigned char *data, int pos);
@@ -28,66 +29,112 @@ void MSDelay(unsigned int);
 
 //Global variables
 unsigned char sentence[100];
+unsigned char latitude[50];
+unsigned int longatude[50];
+
 unsigned char* NMEA;
 unsigned char receivedChar;
 size_t charCount = 0;
 
-unsigned char sample[300] = (unsigned char)"$GPGGA,202410.000,4042.6000,N,07400.4858,W,1,4,3.14,276.7,M,-34.2,M,,*63";
+unsigned char sample[] = "$GPGGA,202410.000,4042.6000,N,07400.4858,W,1,4,3.14,276.7,M,-34.2,M,,*63";
+unsigned char *samplePointer = sample;
 
 void main(void) {
 
-
-  Serial0_begin();
+  //Initializing Serial Communication
+  Serial0_begin(9600);
   GPS_begin(9600);
   
   SerCom0_string((unsigned char*)"PMTK_SET_NMEA_OUTPUT_RMCGGA\r\n");
   SerCom0_string((unsigned char*)"PMTK_SET_NMEA_UPDATE_1HZ\r\n");
-
-  SerCom1_Send((unsigned char*)"PMTK314,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0");
-  SerCom1_Send((unsigned char*)"PMTK_SET_NMEA_UPDATE_1HZ");
+  
+  // Sets up the communication so that it outputs RMGGA
+  SerCom1_Send((unsigned char*)"$PMTK314,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"); 
+  //Sets the update rate to 1hz
+  SerCom1_Send((unsigned char*)"$PMTK220,1000"); 
   
   
   while(1){  
     NMEA = NMEA_sentacne();
-    if(NMEA[3] == 'G'){
-      //unsigned int commaPosition = findComma(NMEA, 7);
+    if(NMEA[5] == 'A'){
       SerCom0_string(NMEA);
-      //SerCom0(NMEA[commaPosition + 1]);
-     // SerCom0(fix(sample*));
-     // SerCom0_string("\r\n");
-      
+      SerCom0(fix(NMEA));
+      SerCom0_string((unsigned char*)"\r\n");
+      if (fix(NMEA) == 'T'){
+        //Displays Data on the screen
+      }
 
     }
   }
 }
 
+
 unsigned char* lat(unsigned char *data){
-  //returns the latitude in MMMM.MM //
+  //returns the latitude in DDDD.DDDDD //
+  int i;
   unsigned int pos_start = findComma(data, 3);
   unsigned int pos_end = findComma(data, 4);
+  float number;
+  float digit_multiplier = 10.0;
   
-  //for() create a new array of the lat values
-  //convert lat from MMMM.SS to MMMM.MM
-  return "a";
   
+  for(i = pos_start + 2; i < pos_end; i++){
+    if (data[i] != '.'){
+      number = number + ((data[i] - 48) * digit_multiplier);
+      digit_multiplier = digit_multiplier / 10;
+    }           
+  } 
+  
+  number = number / 60.0; 
+  
+  for(i = pos_start + 2; i < pos_end; i++){
+    if (data[i] != '.'){
+      latitude[(i - pos_start)] = (int)(number/10) + 48;
+      number = number - (int)(number/10);
+      number = number * 10;
+    } else {
+      latitude[(i - pos_start)] = ('.');
+    }
+  }   
+  return latitude;  
 }
 
 unsigned char* lon(unsigned char *data){
-  //returns the longitude in MMMM.MM //
-  unsigned int pos_start = findComma(data, 3);
-  unsigned int pos_end = findComma(data, 4);
+  //returns the longitude in DDDD.DDDDD //
+  int i;
+  unsigned int pos_start = findComma(data, 5);
+  unsigned int pos_end = findComma(data, 6);
+  float number;
+  float digit_multiplier = 10.0;
   
-  //for() create a new array of the lat values
-  //convert lat from MMMM.SS to MMMM.MM
-  return "a";
+  for(i = pos_start + 2; i < pos_end; i++){
+    if (data[i] != '.'){
+      number = number + ((data[i] - 48) * digit_multiplier);
+      digit_multiplier = digit_multiplier / 10;
+    }    
+         
+  } //mm.mm -> dd.dd
   
+  number = number / 60.0; // converted to dd.ddddd
+  
+  for(i = pos_start + 2; i < pos_end; i++){
+    if (data[i] != '.'){
+      longatude[(i - pos_start)] = (int)(number/10) + 48;
+      number = number - (int)(number/10);
+      number = number * 10;
+    } else {
+      longatude[(i - pos_start)] = ('.');
+    }
+  }   
+  return latitude;  
 }
 
 
 unsigned char fix(unsigned char *data){
+// Retruns T if the GPS has found a fix //
   unsigned int fixPos = findComma(data, 7);
   if (fixPos  != 101){  
-    if (data[fixPos + 1] != '0' ){
+    if ((data[fixPos + 1] + data[fixPos + 2]) != '0' ){
          return 'T';
        } else {
          return 'F'; 
@@ -186,10 +233,11 @@ void MSDelay(unsigned int t){
    }
 }
 
-void Serial0_begin(){
+void Serial0_begin(unsigned int baud_rate){
 // sets up the serial communication registers //
-    SCI0BDH = 0;
-    SCI0BDL = 26;    
+    int baud = (int)(250000 / baud_rate);
+    SCI0BDH = (baud >> 8) & 0xFF; 
+    SCI0BDL = baud & 0xFF; ;    
     SCI0CR1 = 0;
     SCI0CR2 = 0x0C;   
 }
@@ -201,5 +249,6 @@ void GPS_begin(unsigned int baud_rate) {
     SCI1BDL = baud & 0xFF;         
     SCI1CR1 = 0;
     SCI1CR2 = 0x0C;
+     
 }
 
